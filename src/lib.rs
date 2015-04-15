@@ -5,6 +5,14 @@ extern crate libc;
 use std::ffi;
 use std::mem;
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Id(libc::uintptr_t);
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Value(libc::uintptr_t);
+
 pub enum T {
     None = 0x00,
 
@@ -17,27 +25,38 @@ pub enum T {
 }
 
 extern {
-    pub fn rb_define_class_under(
-        module: libc::size_t,
+    fn rb_define_class_under(
+        module: Value,
         name: *const libc::c_char,
-        superclass: libc::size_t)
-        -> libc::size_t;
-    pub fn rb_define_module_under(
-        module: libc::size_t,
+        superclass: Value)
+        -> Value;
+    fn rb_define_module_under(
+        module: Value,
         name: *const libc::c_char)
-        -> libc::size_t;
+        -> Value;
 
-    pub fn rb_define_class(
+    fn rb_define_class(
         name: *const libc::c_char,
-        superclass: libc::size_t)
-        -> libc::size_t;
-    pub fn rb_define_module(
+        superclass: Value)
+        -> Value;
+    fn rb_define_module(
         name: *const libc::c_char)
-        -> libc::size_t;
+        -> Value;
 
-    pub static rb_mKernel: libc::size_t;
-    pub static rb_mEnumerable: libc::size_t;
-    pub static rb_cObject: libc::size_t;
+    fn rb_define_method_id(
+        class: libc::size_t,
+        name: Id,
+        method: *const (),
+        arity: libc::c_int);
+
+    fn rb_intern2(
+        name: *const libc::c_char,
+        length: libc::c_long,
+    ) -> Id;
+
+    static rb_mKernel: libc::size_t;
+    static rb_mEnumerable: libc::size_t;
+    static rb_cObject: libc::size_t;
 }
 
 pub enum Transient<'a> {
@@ -71,11 +90,12 @@ pub struct RModule {
     basic: RBasic,
 }
 
-fn fixnum_p(value: libc::size_t) -> bool {
-    value & 0x1 != 0
+fn fixnum_p(value: Value) -> bool {
+    let Value(raw) = value;
+    raw & 0x1 != 0
 }
 
-pub fn ruby_type(value: libc::size_t) -> T {
+fn ruby_type(value: Value) -> T {
     if fixnum_p(value) {
         return T::Fixnum;
     }
@@ -83,7 +103,7 @@ pub fn ruby_type(value: libc::size_t) -> T {
     return T::Class;
 }
 
-fn value_from_raw<'a>(value: libc::size_t) -> Transient<'a> {
+fn value_from_raw<'a>(value: Value) -> Transient<'a> {
     unsafe {
         match ruby_type(value) {
             T::None => panic!("lol"),
@@ -93,6 +113,51 @@ fn value_from_raw<'a>(value: libc::size_t) -> Transient<'a> {
             T::String => panic!("string not implemented"),
             T::Fixnum => panic!("fixnum not implemented"),
         }
+    }
+}
+
+pub trait Method {
+    unsafe fn as_ptr(self) -> *const ();
+    fn arity() -> i32;
+}
+
+impl Method for extern fn(libc::size_t) -> libc::size_t {
+    unsafe fn as_ptr(self) -> *const () {
+        mem::transmute(self)
+    }
+
+    fn arity() -> i32 {
+        0
+    }
+}
+
+impl Method for extern fn(libc::size_t, libc::size_t) -> libc::size_t {
+    unsafe fn as_ptr(self) -> *const () {
+        mem::transmute(self)
+    }
+
+    fn arity() -> i32 {
+        1
+    }
+}
+
+impl Method for extern fn(libc::size_t, libc::size_t, libc::size_t) -> libc::size_t {
+    unsafe fn as_ptr(self) -> *const () {
+        mem::transmute(self)
+    }
+
+    fn arity() -> i32 {
+        2
+    }
+}
+
+impl Method for extern fn(libc::c_int, *mut libc::size_t, libc::size_t) -> libc::size_t {
+    unsafe fn as_ptr(self) -> *const () {
+        mem::transmute(self)
+    }
+
+    fn arity() -> i32 {
+        -1
     }
 }
 
@@ -108,6 +173,13 @@ impl RClass {
         unsafe {
             let name_c = ffi::CString::new(name).unwrap();
             value_from_raw(rb_define_class_under(mem::transmute(self), name_c.as_ptr(), mem::transmute(superclass)))
+        }
+    }
+
+    pub fn define_method<'a, M>(&'a self, name: &str, method: M) where M: Method {
+        unsafe {
+            let name_id = rb_intern2(name.as_ptr() as *const libc::c_char, name.len() as libc::c_long);
+            rb_define_method_id(mem::transmute(self), name_id, method.as_ptr(), M::arity());
         }
     }
 }

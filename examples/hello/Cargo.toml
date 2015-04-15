@@ -1,0 +1,11 @@
+[package]
+name = "hello"
+version = "0.0.1"
+authors = ["Simon Génier"]
+
+[dependencies.rustby]
+path = "../../"
+
+[lib]
+name = "hello"
+crate-type = ["dylib"]
