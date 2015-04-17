@@ -44,7 +44,7 @@ extern {
         -> Value;
 
     fn rb_define_method_id(
-        class: libc::size_t,
+        class: Value,
         name: Id,
         method: *const (),
         arity: libc::c_int);
@@ -54,9 +54,9 @@ extern {
         length: libc::c_long,
     ) -> Id;
 
-    static rb_mKernel: libc::size_t;
-    static rb_mEnumerable: libc::size_t;
-    static rb_cObject: libc::size_t;
+    static rb_mKernel: Value;
+    static rb_mEnumerable: Value;
+    static rb_cObject: Value;
 }
 
 pub enum Transient<'a> {
@@ -121,7 +121,7 @@ pub trait Method {
     fn arity() -> i32;
 }
 
-impl Method for extern fn(libc::size_t) -> libc::size_t {
+impl Method for extern fn(Value) -> Value {
     unsafe fn as_ptr(self) -> *const () {
         mem::transmute(self)
     }
@@ -131,7 +131,7 @@ impl Method for extern fn(libc::size_t) -> libc::size_t {
     }
 }
 
-impl Method for extern fn(libc::size_t, libc::size_t) -> libc::size_t {
+impl Method for extern fn(Value, Value) -> Value {
     unsafe fn as_ptr(self) -> *const () {
         mem::transmute(self)
     }
@@ -141,7 +141,7 @@ impl Method for extern fn(libc::size_t, libc::size_t) -> libc::size_t {
     }
 }
 
-impl Method for extern fn(libc::size_t, libc::size_t, libc::size_t) -> libc::size_t {
+impl Method for extern fn(Value, Value, Value) -> Value {
     unsafe fn as_ptr(self) -> *const () {
         mem::transmute(self)
     }
@@ -151,7 +151,7 @@ impl Method for extern fn(libc::size_t, libc::size_t, libc::size_t) -> libc::siz
     }
 }
 
-impl Method for extern fn(libc::c_int, *mut libc::size_t, libc::size_t) -> libc::size_t {
+impl Method for extern fn(libc::c_int, *mut Value, Value) -> Value {
     unsafe fn as_ptr(self) -> *const () {
         mem::transmute(self)
     }
@@ -197,6 +197,8 @@ pub fn define_class<'a>(name: &str, superclass: &RClass) -> Transient<'a> {
         value_from_raw(rb_define_class(name_c.as_ptr(), mem::transmute(superclass)))
     }
 }
+
+pub static NIL: Value = Value(0x8);
 
 pub fn m_kernel() -> &'static RModule {
     unsafe {
