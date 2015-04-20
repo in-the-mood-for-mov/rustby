@@ -9,9 +9,11 @@ use std::mem;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Id(libc::uintptr_t);
 
+type RawValue = libc::uintptr_t;
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Value(libc::uintptr_t);
+pub struct Value(RawValue);
 
 pub enum T {
     None = 0x00,
@@ -19,9 +21,15 @@ pub enum T {
     Object = 0x01,
     Class = 0x02,
     Module = 0x03,
+    Float = 0x04,
     String = 0x05,
 
+    Nil = 0x11,
+    True = 0x12,
+    False = 0x13,
+    Symbol = 0x14,
     Fixnum = 0x15,
+    Undef = 0x16,
 }
 
 extern {
@@ -59,6 +67,7 @@ extern {
     static rb_cObject: Value;
 }
 
+#[derive(Debug)]
 pub enum Transient<'a> {
     None,
     Object(&'a RObject),
@@ -73,34 +82,88 @@ pub enum Transient<'a> {
 }
 
 #[repr(C)]
-pub struct RBasic;
+#[derive(Debug)]
+pub struct RBasic {
+    flags: RawValue,
+}
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct RObject {
     basic: RBasic,
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct RClass {
     basic: RBasic,
 }
 
-#[repr(C)]
-pub struct RModule {
-    basic: RBasic,
+static T_MASK: RawValue = 0x1f;
+
+static FLONUM_MASK: RawValue = 0x03;
+static FLONUM_FLAG: RawValue = 0x02;
+static SPECIAL_MASK: RawValue = 0xff;
+static SYMBOL_FLAG: RawValue = 0x0c;
+
+pub static QNIL: Value = Value(0x08);
+pub static QTRUE: Value = Value(0x14);
+pub static QFALSE: Value = Value(0x00);
+pub static QUNDEF: Value = Value(0x34);
+
+fn immediate_p(value: Value) -> bool {
+    let Value(raw) = value;
+    raw & 0x7 != 0
 }
 
 fn fixnum_p(value: Value) -> bool {
     let Value(raw) = value;
-    raw & 0x1 != 0
+    raw & 0x1 == 0x1
+}
+
+fn flonum_p(value: Value) -> bool {
+    let Value(raw) = value;
+    raw & FLONUM_MASK == FLONUM_FLAG
+}
+
+fn truthy_p(value: Value) -> bool {
+    let Value(raw) = value;
+    let Value(raw_nil) = QNIL;
+    raw & !raw_nil == 0
+}
+
+fn static_sym_p(value: Value) -> bool {
+    let Value(raw) = value;
+    raw & SPECIAL_MASK == SYMBOL_FLAG
+}
+
+unsafe fn builtin_type(value: Value) -> T {
+    let basic: *const RBasic = mem::transmute(value);
+    mem::transmute(((*basic).flags & T_MASK) as u8)
 }
 
 fn ruby_type(value: Value) -> T {
-    if fixnum_p(value) {
-        return T::Fixnum;
+    if immediate_p(value) {
+        if fixnum_p(value) {
+            return T::Fixnum;
+        } else if flonum_p(value) {
+            return T::Float;
+        } else if value == QTRUE {
+            return T::True;
+        } else if static_sym_p(value) {
+            return T::Symbol;
+        } else if value == QUNDEF {
+            return T::Undef;
+        }
+    } else if !truthy_p(value) {
+        if value == QNIL {
+            return T::Nil;
+        } else if value == QFALSE {
+            return T::False;
+        }
     }
 
-    return T::Class;
+    unsafe { builtin_type(value) }
 }
 
 fn value_from_raw<'a>(value: Value) -> Transient<'a> {
@@ -109,9 +172,16 @@ fn value_from_raw<'a>(value: Value) -> Transient<'a> {
             T::None => panic!("lol"),
             T::Object => Transient::Object(mem::transmute(value)),
             T::Class => Transient::Class(mem::transmute(value)),
-            T::Module => Transient::Class(mem::transmute(value)),
+            T::Module => Transient::Module(mem::transmute(value)),
+            T::Float => panic!("float not implemented"),
             T::String => panic!("string not implemented"),
+
+            T::Nil => Transient::Nil,
+            T::True => Transient::True,
+            T::False => Transient::False,
+            T::Symbol => panic!("symbol not implemented"),
             T::Fixnum => panic!("fixnum not implemented"),
+            T::Undef => panic!("undef not implemented"),
         }
     }
 }
@@ -184,36 +254,36 @@ impl RClass {
     }
 }
 
-pub fn define_module<'a>(name: &str) -> Transient<'a> {
+pub fn define_module<'a>(name: &str) -> &'static RClass {
     unsafe {
         let name_c = ffi::CString::new(name).unwrap();
-        value_from_raw(rb_define_module(name_c.as_ptr()))
+        let result = rb_define_module(name_c.as_ptr());
+        match value_from_raw(result) {
+            Transient::Module(class) => class,
+            value@_ => panic!("expected Module, got {:?}", value),
+        }
     }
 }
 
-pub fn define_class<'a>(name: &str, superclass: &RClass) -> Transient<'a> {
+pub fn define_class<'a>(name: &str, superclass: &RClass) -> &'static RClass {
     unsafe {
         let name_c = ffi::CString::new(name).unwrap();
-        value_from_raw(rb_define_class(name_c.as_ptr(), mem::transmute(superclass)))
+        let result = rb_define_class(name_c.as_ptr(), mem::transmute(superclass));
+        match value_from_raw(result) {
+            Transient::Class(class) => class,
+            value@_ => panic!("expected Class, got {:?}", value),
+        }
     }
 }
 
-pub static NIL: Value = Value(0x8);
-
-pub fn m_kernel() -> &'static RModule {
-    unsafe {
-        mem::transmute(rb_mKernel)
-    }
+pub fn m_kernel() -> &'static RClass {
+    unsafe { mem::transmute(rb_mKernel) }
 }
 
-pub fn m_enumerable() -> &'static RModule {
-    unsafe {
-        mem::transmute(rb_mEnumerable)
-    }
+pub fn m_enumerable() -> &'static RClass {
+    unsafe { mem::transmute(rb_mEnumerable) }
 }
 
 pub fn c_object() -> &'static RClass {
-    unsafe {
-        mem::transmute(rb_cObject)
-    }
+    unsafe { mem::transmute(rb_cObject) }
 }
