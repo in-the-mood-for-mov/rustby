@@ -51,6 +51,10 @@ extern {
         name: *const libc::c_char)
         -> Value;
 
+    fn rb_singleton_class(
+        class: Value)
+        -> Value;
+
     fn rb_define_method_id(
         class: Value,
         name: Id,
@@ -250,6 +254,14 @@ impl RClass {
         unsafe {
             let name_id = rb_intern2(name.as_ptr() as *const libc::c_char, name.len() as libc::c_long);
             rb_define_method_id(mem::transmute(self), name_id, method.as_ptr(), M::arity());
+        }
+    }
+
+    pub fn define_singleton_method<'a, M>(&'a self, name: &str, method: M) where M: Method {
+        unsafe {
+            let name_id = rb_intern2(name.as_ptr() as *const libc::c_char, name.len() as libc::c_long);
+            let singleton_class = rb_singleton_class(mem::transmute(self));
+            rb_define_method_id(mem::transmute(singleton_class), name_id, method.as_ptr(), M::arity());
         }
     }
 }
