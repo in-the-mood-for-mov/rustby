@@ -1,5 +1,7 @@
 [package]
-
 name = "rustby"
 version = "0.1.0"
-authors = [ "simon@webscale.money" ]
+authors = ["simon@webscale.money"]
+
+[dependencies]
+libc = "0.1.10"
