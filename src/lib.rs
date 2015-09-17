@@ -116,6 +116,11 @@ static QTRUE: VALUE = 0x14;
 static QFALSE: VALUE = 0x00;
 static QUNDEF: VALUE = 0x34;
 
+pub static NIL: Value = Value(*&QNIL);
+pub static TRUE: Value = Value(*&QTRUE);
+pub static FALSE: Value = Value(*&QFALSE);
+pub static UNDEF: Value = Value(*&QUNDEF);
+
 fn immediate_p(value: VALUE) -> bool {
     value & 0x7 != 0
 }
