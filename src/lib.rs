@@ -3,15 +3,17 @@ extern crate libc;
 use std::ffi;
 use std::mem;
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Id(libc::uintptr_t);
-
-type RawValue = libc::uintptr_t;
+type ID = libc::uintptr_t;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Value(RawValue);
+pub struct Id(ID);
+
+type VALUE = libc::uintptr_t;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Value(VALUE);
 
 pub enum T {
     None = 0x00,
@@ -32,41 +34,41 @@ pub enum T {
 
 extern {
     fn rb_define_class_under(
-        module: Value,
+        module: VALUE,
         name: *const libc::c_char,
-        superclass: Value)
-        -> Value;
+        superclass: VALUE)
+        -> VALUE;
     fn rb_define_module_under(
-        module: Value,
+        module: VALUE,
         name: *const libc::c_char)
-        -> Value;
+        -> VALUE;
 
     fn rb_define_class(
         name: *const libc::c_char,
-        superclass: Value)
-        -> Value;
+        superclass: VALUE)
+        -> VALUE;
     fn rb_define_module(
         name: *const libc::c_char)
-        -> Value;
+        -> VALUE;
 
     fn rb_singleton_class(
-        class: Value)
-        -> Value;
+        class: VALUE)
+        -> VALUE;
 
     fn rb_define_method_id(
-        class: Value,
-        name: Id,
+        class: VALUE,
+        name: ID,
         method: *const (),
         arity: libc::c_int);
 
     fn rb_intern2(
         name: *const libc::c_char,
         length: libc::c_long,
-    ) -> Id;
+    ) -> ID;
 
-    static rb_mKernel: Value;
-    static rb_mEnumerable: Value;
-    static rb_cObject: Value;
+    static rb_mKernel: VALUE;
+    static rb_mEnumerable: VALUE;
+    static rb_cObject: VALUE;
 }
 
 #[derive(Debug)]
@@ -86,7 +88,8 @@ pub enum Transient<'a> {
 #[repr(C)]
 #[derive(Debug)]
 pub struct RBasic {
-    flags: RawValue,
+    flags: Value,
+    class: Value,
 }
 
 #[repr(C)]
@@ -101,50 +104,61 @@ pub struct RClass {
     basic: RBasic,
 }
 
-static T_MASK: RawValue = 0x1f;
+static T_MASK: VALUE = 0x1f;
 
-static FLONUM_MASK: RawValue = 0x03;
-static FLONUM_FLAG: RawValue = 0x02;
-static SPECIAL_MASK: RawValue = 0xff;
-static SYMBOL_FLAG: RawValue = 0x0c;
+static FLONUM_MASK: VALUE = 0x03;
+static FLONUM_FLAG: VALUE = 0x02;
+static SPECIAL_MASK: VALUE = 0xff;
+static SYMBOL_FLAG: VALUE = 0x0c;
 
-pub static QNIL: Value = Value(0x08);
-pub static QTRUE: Value = Value(0x14);
-pub static QFALSE: Value = Value(0x00);
-pub static QUNDEF: Value = Value(0x34);
+static QNIL: VALUE = 0x08;
+static QTRUE: VALUE = 0x14;
+static QFALSE: VALUE = 0x00;
+static QUNDEF: VALUE = 0x34;
 
-fn immediate_p(value: Value) -> bool {
-    let Value(raw) = value;
-    raw & 0x7 != 0
+fn immediate_p(value: VALUE) -> bool {
+    value & 0x7 != 0
 }
 
-fn fixnum_p(value: Value) -> bool {
-    let Value(raw) = value;
-    raw & 0x1 == 0x1
+fn fixnum_p(value: VALUE) -> bool {
+    value & 0x1 == 0x1
 }
 
-fn flonum_p(value: Value) -> bool {
-    let Value(raw) = value;
-    raw & FLONUM_MASK == FLONUM_FLAG
+fn flonum_p(value: VALUE) -> bool {
+    value & FLONUM_MASK == FLONUM_FLAG
 }
 
-fn truthy_p(value: Value) -> bool {
-    let Value(raw) = value;
-    let Value(raw_nil) = QNIL;
-    raw & !raw_nil == 0
+fn truthy_p(value: VALUE) -> bool {
+    value & QNIL == 0
 }
 
-fn static_sym_p(value: Value) -> bool {
-    let Value(raw) = value;
-    raw & SPECIAL_MASK == SYMBOL_FLAG
+fn static_sym_p(value: VALUE) -> bool {
+    value & SPECIAL_MASK == SYMBOL_FLAG
 }
 
-unsafe fn builtin_type(value: Value) -> T {
+unsafe fn builtin_type(value: VALUE) -> T {
     let basic: *const RBasic = mem::transmute(value);
-    mem::transmute(((*basic).flags & T_MASK) as u8)
+    let Value(flags) = (*basic).flags;
+    match flags & T_MASK {
+        0x00 => T::None,
+
+        0x01 => T::Object,
+        0x02 => T::Class,
+        0x03 => T::Module,
+        0x04 => T::Float,
+        0x05 => T::String,
+
+        0x11 => T::Nil,
+        0x12 => T::True,
+        0x13 => T::False,
+        0x14 => T::Symbol,
+        0x15 => T::Fixnum,
+        0x16 => T::Undef,
+        _ => panic!("unknown type tag {}", flags),
+    }
 }
 
-fn ruby_type(value: Value) -> T {
+fn ruby_type(value: VALUE) -> T {
     if immediate_p(value) {
         if fixnum_p(value) {
             return T::Fixnum;
@@ -168,7 +182,7 @@ fn ruby_type(value: Value) -> T {
     unsafe { builtin_type(value) }
 }
 
-fn value_from_raw<'a>(value: Value) -> Transient<'a> {
+fn value_from_raw<'a>(value: VALUE) -> Transient<'a> {
     unsafe {
         match ruby_type(value) {
             T::None => panic!("lol"),
