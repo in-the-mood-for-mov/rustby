@@ -3,6 +3,9 @@ name = "hello"
 version = "0.0.1"
 authors = ["Simon Génier"]
 
+[dependencies]
+libc = "0.1.10"
+
 [dependencies.rustby]
 path = "../../"
 

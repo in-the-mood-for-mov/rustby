@@ -1,11 +1,9 @@
-#![feature(libc)]
-
 extern crate libc;
 extern crate rustby as rb;
 
 extern fn print_hello(_: rb::Value) -> rb::Value {
     println!("Hello from Rust!");
-    rb::QNIL
+    rb::NIL
 }
 
 #[no_mangle]
